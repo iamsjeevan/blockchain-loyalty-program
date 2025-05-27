@@ -1,26 +1,25 @@
-import { PrivyClient } from '@privy-io/server-auth';
+// backend/src/config/privy.ts
+import {PrivyClient} from '@privy-io/server-auth';
 import dotenv from 'dotenv';
 
-dotenv.config(); // Ensure environment variables are loaded
+dotenv.config();
 
 const privyAppId = process.env.PRIVY_APP_ID;
 const privyAppSecret = process.env.PRIVY_APP_SECRET;
 
 if (!privyAppId || !privyAppSecret) {
-  console.error('ERROR: Privy App ID or Secret is not defined in .env file.');
-  // Optionally exit or throw error if running in a context where this is critical at startup
-  // process.exit(1);
+  console.error('CRITICAL ERROR: Privy App ID or Secret is not defined in .env file for backend.');
+  // Consider throwing an error or exiting if these are critical for app startup
+  // For now, client will be null and features will fail.
 }
 
-// Initialize Privy client - ensure credentials are provided
-// Adding a check to handle potential undefined values if you want the app to start even if not set
-// However, Privy features will not work. For production, these should always be set.
-let privyClient: PrivyClient | null = null;
-if (privyAppId && privyAppSecret) {
-    privyClient = new PrivyClient(privyAppId, privyAppSecret);
-} else {
-    console.warn("Privy client not initialized due to missing credentials. Auth features will be disabled.");
-}
+// Initialize with null check for robustness, though they should be set
+const privyClient = (privyAppId && privyAppSecret) 
+    ? new PrivyClient(privyAppId, privyAppSecret) 
+    : null;
 
+if (!privyClient) {
+    console.warn("Privy client could not be initialized due to missing App ID or Secret. Backend auth features will be disabled.");
+}
 
 export default privyClient;

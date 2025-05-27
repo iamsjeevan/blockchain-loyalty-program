@@ -1,396 +1,138 @@
 #!/bin/bash
 
 echo "--------------------------------------------------"
-echo "Setting up Basic React Frontend with Vite and Privy..."
+echo "Setting up Backend: Record Redemption Endpoint..."
 echo "--------------------------------------------------"
 
 # Ensure we are in the main project directory
-# cd /path/to/your/blockchain-loyalty-program # Or ensure you run this from the root
+# cd /path/to/your/blockchain-loyalty-program
 
-# 1. Create the frontend directory using Vite (React with TypeScript)
-if [ -d "frontend" ]; then
-  echo "Frontend directory already exists. Please remove or rename it if you want a fresh setup."
-  # exit 1 # Optionally exit
-else
-  echo "Creating React+TypeScript project in 'frontend' directory using Vite..."
-  # npm create vite@latest <project-name> -- --template <template-name>
-  # We need to handle the interactive prompts from 'npm create vite@latest'
-  # For non-interactive, we might need a more complex approach or a template.
-  # Let's try to provide input. User might need to confirm manually.
-  npm create vite@latest frontend -- --template react-ts <<INPUT
-# Prompts:
-# √ Project name: ... frontend (already provided)
-# √ Select a framework: » React
-# √ Select a variant: » TypeScript
-# If the above doesn't work non-interactively, user must run:
-# npm create vite@latest frontend -- --template react-ts
-# and select React then TypeScript.
-INPUT
-  echo "Vite project 'frontend' created."
+if [ ! -d "backend/src/routes" ]; then
+  echo "Error: 'backend/src/routes' directory not found. Please ensure backend is set up."
+  exit 1
 fi
 
-# Check if frontend project was created successfully
-if [ ! -d "frontend" ] || [ ! -f "frontend/package.json" ]; then
-    echo ""
-    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-    echo "Vite project creation might have failed or required manual interactive steps."
-    echo "If the 'frontend' directory or 'frontend/package.json' was not created, please run manually:"
-    echo "  npm create vite@latest frontend -- --template react-ts"
-    echo "And choose 'React' then 'TypeScript'."
-    echo "Then, navigate into 'frontend', run 'npm install', and then re-run this script (or apply steps manually)."
-    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-    exit 1
-fi
+cd backend
 
+# 1. Update coffeeCoinRoutes.ts (or create a new loyaltyRoutes.ts if preferred)
+# For simplicity, we'll add to coffeeCoinRoutes.ts for now.
+echo "Updating src/routes/coffeeCoinRoutes.ts to add /record-redemption route..."
 
-# Navigate into the frontend directory
-cd frontend
+# We need to be careful when modifying existing files with bash.
+# This approach will append the new route. A more robust method would be to parse and insert,
+# or replace the whole file if we are sure of its previous state.
+# Given the current state, appending and then adjusting server.ts should work.
 
-# 2. Install dependencies (Vite does this, but let's ensure) and Privy SDK
-echo "Ensuring dependencies are installed and adding Privy React SDK..."
-npm install
-npm install @privy-io/react-auth ethers@^6.11.1 # Using ethers v6
+# Create a temporary file for the new route
+cat <<'EOL_NEW_ROUTE' > new_redemption_route.tmp
+// --- Protected Route for Recording a Redemption ---
+// This endpoint is called by the frontend AFTER a successful on-chain burn transaction.
+router.post('/record-redemption', authenticateUser, async (req: Request, res: Response): Promise<Response | void> => {
+  // The 'authenticateUser' middleware ensures req.user exists if token is valid
+  const userFromRequest = (req as any).user; // Or use proper typing if req.user is strongly typed globally
 
-# 3. Create .env file for frontend with Privy App ID
-echo "Creating .env file for frontend (frontend/.env)..."
-cat <<EOL > .env
-# Your Privy App ID (get this from the Privy Dashboard)
-# IMPORTANT: This is a public App ID, safe to expose in frontend code.
-VITE_PRIVY_APP_ID=YOUR_PRIVY_APP_ID_HERE
-
-# Optional: Backend API URL
-VITE_BACKEND_API_URL=http://localhost:3001/api
-EOL
-echo "frontend/.env created. IMPORTANT: Fill in your VITE_PRIVY_APP_ID."
-
-# 4. Update App.tsx to include PrivyProvider and basic login UI
-echo "Updating src/App.tsx for Privy integration..."
-cat <<EOL > src/App.tsx
-import { PrivyProvider, usePrivy } from '@privy-io/react-auth';
-import { useState, useEffect } from 'react';
-import './App.css'; // Assuming you have some basic styles
-
-// Define the structure for user wallet info if needed
-interface UserWallet {
-  address: string;
-  chainId?: string | number;
-  walletType?: string;
-}
-
-// Define the structure for the authenticated user data from backend
-interface AuthenticatedUserData {
-  message: string;
-  privyDid: string;
-  wallet?: UserWallet;
-}
-
-function AppContent() {
-  const { ready, authenticated, user, login, logout, linkEmail, linkGoogle } = usePrivy();
-  const [backendUser, setBackendUser] = useState<AuthenticatedUserData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [coffeeCoinBalance, setCoffeeCoinBalance] = useState<string | null>(null);
-  const [tokenInfo, setTokenInfo] = useState<{name: string, symbol: string} | null>(null);
-
-  // This is your Privy Auth Token. You will send this to your backend.
-  const getAuthToken = async () => {
-    try {
-      const token = await user?.getIdToken(); // Or getAccessToken()
-      return token;
-    } catch (e) {
-      console.error("Error getting auth token", e);
-      return null;
-    }
-  };
-
-  // Fetch data from your backend's protected route
-  const fetchBackendUserData = async () => {
-    if (!authenticated) {
-      setBackendUser(null);
-      setError('User not authenticated with Privy.');
-      return;
-    }
-
-    try {
-      const authToken = await getAuthToken();
-      if (!authToken) {
-        setError("Could not retrieve auth token.");
-        return;
-      }
-
-      const response = await fetch(\`\${import.meta.env.VITE_BACKEND_API_URL}/user/me\`, {
-        headers: {
-          'Authorization': \`Bearer \${authToken}\`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || \`Failed to fetch user data: \${response.status}\`);
-      }
-      const data: AuthenticatedUserData = await response.json();
-      setBackendUser(data);
-      setError(null); // Clear previous errors
-      // If user has a wallet, fetch their CoffeeCoin balance
-      if (data.wallet?.address) {
-        fetchCoffeeCoinBalance(data.wallet.address);
-      }
-    } catch (e: any) {
-      console.error("Error fetching backend user data:", e);
-      setError(e.message || 'An unknown error occurred.');
-      setBackendUser(null);
-    }
-  };
-
-  const fetchCoffeeCoinBalance = async (walletAddress: string) => {
-    try {
-      const response = await fetch(\`\${import.meta.env.VITE_BACKEND_API_URL}/coffee-coin/balance/\${walletAddress}\`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch CoffeeCoin balance');
-      }
-      const data = await response.json();
-      setCoffeeCoinBalance(data.balance);
-    } catch (e: any) {
-      console.error("Error fetching CoffeeCoin balance:", e);
-      setCoffeeCoinBalance('Error');
-    }
-  };
-
-  const fetchTokenInformation = async () => {
-    try {
-      const response = await fetch(\`\${import.meta.env.VITE_BACKEND_API_URL}/coffee-coin/info\`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch token info');
-      }
-      const data = await response.json();
-      setTokenInfo(data);
-    } catch (e: any) {
-      console.error("Error fetching token info:", e);
-    }
-  };
-
-  useEffect(() => {
-    fetchTokenInformation(); // Fetch token info on component mount
-  }, []);
-
-
-  // Disable login button until Privy is ready
-  const isLoginDisabled = !ready;
-  // Disable logout button until Privy is ready or if not authenticated
-  const isLogoutDisabled = !ready || !authenticated;
-
-  return (
-    <div className="container">
-      <h1>{tokenInfo ? \`Welcome to \${tokenInfo.name} (\${tokenInfo.symbol}) Rewards!\` : 'CoffeeCoin Rewards'}</h1>
-      
-      {error && <p style={{ color: 'red' }}>Error: {error}</p>}
-
-      {ready && authenticated ? (
-        <div>
-          <p>You are logged in!</p>
-          {user && (
-            <div>
-              <p><strong>Privy User ID (DID):</strong> {user.id}</p>
-              {user.wallet ? (
-                <div>
-                  <p><strong>Your Embedded Wallet Address (Sepolia):</strong> {user.wallet.address}</p>
-                  <p><strong>Chain ID:</strong> {user.wallet.chainId}</p>
-                </div>
-              ) : (
-                <p>No primary embedded wallet found directly on user object. Check linked accounts.</p>
-              )}
-               {/* Display all linked accounts */}
-              <h3>Linked Accounts:</h3>
-              <ul>
-                {user.linkedAccounts.map((account, index) => (
-                  <li key={index}>
-                    Type: {account.type} 
-                    {account.type === 'wallet' && \` | Address: \${(account as any).address} | Chain: \${(account as any).chainId} (\${(account as any).chainType}) | Wallet Type: \${(account as any).walletClientType}\`}
-                    {account.type === 'email' && \` | Email: \${(account as any).address}\`}
-                    {account.type === 'google' && \` | Subject: \${(account as any).subject} | Name: \${(account as any).name}\`}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <button onClick={logout} disabled={isLogoutDisabled}>Log Out</button>
-          <hr />
-          <button onClick={fetchBackendUserData} disabled={!authenticated}>Fetch My Backend User Data</button>
-          {backendUser && (
-            <div>
-              <h3>Backend User Data:</h3>
-              <p>Message: {backendUser.message}</p>
-              <p>Privy DID (from backend): {backendUser.privyDid}</p>
-              {backendUser.wallet ? (
-                <div>
-                  <p>Wallet Address (from backend): {backendUser.wallet.address}</p>
-                  <p>CoffeeCoin Balance: {coffeeCoinBalance !== null ? coffeeCoinBalance : 'Loading...'}</p>
-                </div>
-
-              ) : (
-                <p>No Sepolia wallet found for user via backend.</p>
-              )}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div>
-          <p>Please log in to access your rewards.</p>
-          <button onClick={login} disabled={isLoginDisabled}>Log In with Privy</button>
-          <p><em>(Privy will show Email / Google login options)</em></p>
-        </div>
-      )}
-       {!user?.email?.address && authenticated && (
-          <button onClick={linkEmail} disabled={!ready}>Link Email</button>
-        )}
-        {/* Add other link methods if needed, e.g., linkGoogle, linkWallet, etc. */}
-    </div>
-  );
-}
-
-function App() {
-  const privyAppId = import.meta.env.VITE_PRIVY_APP_ID;
-
-  if (!privyAppId) {
-    return (
-      <div>
-        <h1>Configuration Error</h1>
-        <p>Privy App ID is not set. Please check your <code>.env</code> file and ensure <code>VITE_PRIVY_APP_ID</code> is defined.</p>
-      </div>
-    );
+  if (!userFromRequest || !userFromRequest.privyDid) {
+    return res.status(401).json({ error: 'User not authenticated or Privy DID not found.' });
   }
   
-  const handleLogin = (user: any /* Privy User object */) => {
-    console.log(\`User logged in: \${user.id}\`);
-    // You can trigger backend calls or other actions here
-  };
+  const { rewardId, pointsBurned, burnTransactionHash } = req.body;
 
-  return (
-    <PrivyProvider
-      appId={privyAppId}
-      onSuccess={handleLogin} // Optional: callback when login is successful
-      config={{
-        // Customize Privy modal settings here
-        loginMethods: ['email', 'google'], // Specify methods
-        appearance: {
-          theme: 'light',
-          accentColor: '#676FFF',
-          logo: 'YOUR_LOGO_URL_HERE', // Optional: replace with your logo URL
-        },
-        embeddedWallets: {
-          createOnLogin: 'users-without-wallets', // Or 'all-users'
-          noPromptOnSignature: false, // If true, user is not prompted for SiWE for new wallets. Default false.
-          // Specify which chain your dApp works with
-          // For our loyalty program, we use Sepolia
-          defaultChainId: 'eip155:11155111', // Sepolia chain ID
-        },
-      }}
-    >
-      <AppContent />
-    </PrivyProvider>
-  );
-}
+  if (!rewardId || typeof pointsBurned === 'undefined' || !burnTransactionHash) {
+    return res.status(400).json({ error: 'Missing rewardId, pointsBurned, or burnTransactionHash in request body.' });
+  }
 
-export default App;
-EOL
-echo "src/App.tsx updated."
+  let pointsBurnedBigInt: bigint;
+  try {
+    pointsBurnedBigInt = BigInt(pointsBurned);
+    if (pointsBurnedBigInt <= 0n) {
+      return res.status(400).json({ error: 'Points burned must be positive.' });
+    }
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid pointsBurned format. Must be a number string.' });
+  }
 
-# 5. Basic CSS for layout (src/App.css) - Optional but helpful
-echo "Adding basic styles to src/App.css..."
-cat <<EOL > src/App.css
-body {
-  font-family: sans-serif;
-  margin: 0;
-  padding: 0;
-  background-color: #f4f4f4;
-  color: #333;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start; /* Align to top */
-  min-height: 100vh;
-  padding-top: 20px;
-}
+  console.log(`Backend: /record-redemption request for user ${userFromRequest.privyDid}`);
+  console.log(`  Reward ID: ${rewardId}`);
+  console.log(`  Points Burned: ${pointsBurnedBigInt}`);
+  console.log(`  Burn Tx Hash: ${burnTransactionHash}`);
+  console.log(`  User Wallet (if available from middleware): ${userFromRequest.wallet?.address || 'N/A'}`);
 
-.container {
-  background-color: #fff;
-  padding: 20px 40px;
-  border-radius: 8px;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-  width: 100%;
-  max-width: 700px;
-  text-align: center;
-}
+  // TODO: In a real application:
+  // 1. Validate the rewardId against available rewards.
+  // 2. Verify the burnTransactionHash on the blockchain to confirm the burn actually happened
+  //    and was for the correct amount and by this user (or from their wallet). This is crucial for security.
+  // 3. Store the redemption details in your database (e.g., which user redeemed what reward, when, txHash).
+  // 4. Potentially issue a unique voucher code for the user to claim the reward.
+  // 5. Handle any errors during this process.
 
-button {
-  background-color: #007bff;
-  color: white;
-  border: none;
-  padding: 10px 15px;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 16px;
-  margin: 5px;
-}
+  // For this demo, we'll just simulate success.
+  const voucherCode = `COFFEE-${rewardId.toUpperCase()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
-button:disabled {
-  background-color: #ccc;
-  cursor: not-allowed;
-}
+  // After successful redemption, the frontend will likely re-fetch the user's CoffeeCoin balance.
+  // We can also return the new balance if we were to fetch it here again.
+  // For now, just confirming recording.
+  
+  return res.status(200).json({ 
+    message: `Redemption for '${rewardId}' successfully recorded.`,
+    rewardId,
+    pointsBurned: pointsBurnedBigInt.toString(),
+    burnTransactionHash,
+    voucherCode, // Example voucher code
+    // newBalance: "TODO" // Could fetch and return new balance
+  });
+});
 
-button:hover:not(:disabled) {
-  background-color: #0056b3;
-}
+EOL_NEW_ROUTE
 
-hr {
-  margin: 20px 0;
-  border: 0;
-  border-top: 1px solid #eee;
-}
+# Append the new route before the 'export default router;' line in coffeeCoinRoutes.ts
+# This is a bit fragile; a more robust script would use a tool that can parse and modify JS/TS.
+# For now, this common pattern works if 'export default router;' is the last significant line.
+awk '/export default router;/ { print prev_line; prev_line="" } { if (prev_line != "") print prev_line; prev_line=$0 } END { if (prev_line != "") print prev_line }' src/routes/coffeeCoinRoutes.ts > tmp_coffeeCoinRoutes.ts
+cat new_redemption_route.tmp >> tmp_coffeeCoinRoutes.ts
+echo "" >> tmp_coffeeCoinRoutes.ts # Ensure a newline before export
+echo "export default router;" >> tmp_coffeeCoinRoutes.ts
+mv tmp_coffeeCoinRoutes.ts src/routes/coffeeCoinRoutes.ts
+rm new_redemption_route.tmp
 
-input[type="text"], input[type="number"] {
-  padding: 8px;
-  margin: 5px;
-  border-radius: 4px;
-  border: 1px solid #ddd;
-}
+echo "src/routes/coffeeCoinRoutes.ts updated with /record-redemption route."
+echo ""
 
-ul {
-  list-style-type: none;
-  padding: 0;
-}
+# No changes needed to blockchainService.ts for this step, as the burn happens on frontend.
+# No changes needed to server.ts if coffeeCoinRoutes are already mounted at /api/coffee-coin.
 
-li {
-  background-color: #f9f9f9;
-  border: 1px solid #eee;
-  padding: 8px;
-  margin-bottom: 5px;
-  border-radius: 4px;
-  text-align: left;
-  font-size: 0.9em;
-}
-EOL
-echo "src/App.css updated."
-
-# Navigate back to the project root
+# Navigate back to project root
 cd ..
 
 echo ""
-echo "--------------------------------------------------"
-echo "Basic React Frontend Setup with Privy Complete!"
+echo "-----------------------------------------------------------"
+echo "Backend Record Redemption Endpoint Setup Complete!"
 echo ""
-echo "IMPORTANT Next Steps:"
-echo "1. Navigate into the 'frontend' directory: cd frontend"
-echo "2. CRITICAL: Open 'frontend/.env' and set your actual 'VITE_PRIVY_APP_ID'."
-echo "   (You got this from your Privy dashboard)."
-echo "3. Ensure your backend server is running (in another terminal: cd backend && npm run dev)."
-echo "4. To run the frontend development server:"
-echo "   npm run dev"
-echo "5. Open your browser and go to the URL provided by Vite (usually http://localhost:5173)."
-echo "   You should see the login button. Try logging in with Email or Google."
+echo "Next Steps:"
+echo "1. Restart your backend server (cd backend && npm run dev)."
+echo "   Watch for any errors on startup."
+echo ""
+echo "2. To test this new endpoint (e.g., using Postman or curl):"
+echo "   - Method: POST"
+echo "   - URL: http://localhost:3001/api/coffee-coin/record-redemption"
+echo "   - Headers: "
+echo "     - 'Content-Type: application/json'"
+echo "     - 'Authorization: Bearer YOUR_PRIVY_AUTH_TOKEN' (Get this from frontend after logging in)"
+echo "   - Body (raw JSON):"
+echo "     { "
+echo "       \"rewardId\": \"reward1_free_coffee\", "
+echo "       \"pointsBurned\": \"25\", "
+echo "       \"burnTransactionHash\": \"0x123abc_simulated_burn_hash_def456\" "
+echo "     }"
+echo ""
+echo "   You will need a valid Privy Auth Token from your logged-in frontend user."
+echo "   This endpoint currently just logs the data and returns a mock voucher code."
+echo ""
+echo "3. The NEXT major step will be to implement the actual 'burn' transaction"
+echo "   on the FRONTEND using Privy's SDK when a user clicks 'Redeem'."
 echo ""
 echo "Git:"
-echo "Once you've tested login and it looks good, commit these changes:"
+echo "Once backend is restarted and you've conceptually tested (or prepared to test), commit:"
 echo "  git add ."
-echo "  git commit -m \"feat(frontend): Initial React+Vite setup with Privy login and user display\""
+echo "  git commit -m \"feat(backend): Add /record-redemption endpoint for post-burn processing\""
 echo "  git push origin main"
-echo "--------------------------------------------------"
+echo "-----------------------------------------------------------"

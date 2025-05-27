@@ -24,18 +24,22 @@ app.get('/api/health', (req, res) => {
 });
 // --- API Routes ---
 app.use('/api/coffee-coin', coffeeCoinRoutes_1.default);
+// backend/src/server.ts
+// ...
 app.get('/api/user/me', authMiddleware_1.authenticateUser, (req, res) => {
-    if (req.user) {
+    const userFromRequest = req.user; // Use 'as any' or proper typing
+    if (userFromRequest) {
         res.status(200).json({
             message: 'Successfully authenticated!',
-            privyDid: req.user.privyDid,
-            wallet: req.user.wallet,
+            privyDid: userFromRequest.privyDid,
+            wallet: userFromRequest.wallet,
         });
     }
     else {
         res.status(401).json({ error: 'User not authenticated or user data unavailable' });
     }
 });
+// ...
 app.listen(port, () => {
     console.log(`Backend server is running on http://localhost:${port}`);
     setTimeout(() => {

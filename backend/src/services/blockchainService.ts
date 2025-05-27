@@ -1,11 +1,12 @@
-import { ethers, Contract, Provider, JsonRpcProvider } from 'ethers';
+import { ethers, Contract, Provider, JsonRpcProvider, Wallet, TransactionResponse, TransactionReceipt } from 'ethers';
 import dotenv from 'dotenv';
 import CoffeeCoinABI from '../config/CoffeeCoin.json'; // Import the ABI
 
-dotenv.config(); // Load .env variables from backend/.env
+dotenv.config(); 
 
 const sepoliaRpcUrl = process.env.SEPOLIA_RPC_URL;
 const coffeeCoinContractAddress = process.env.COFFEE_COIN_CONTRACT_ADDRESS;
+const serverWalletPrivateKey = process.env.SERVER_WALLET_PRIVATE_KEY; // For minting
 
 if (!sepoliaRpcUrl) {
   throw new Error('SEPOLIA_RPC_URL is not defined in .env');
@@ -17,92 +18,89 @@ if (!CoffeeCoinABI || !CoffeeCoinABI.abi) {
   throw new Error('CoffeeCoin ABI is not loaded correctly or is missing the .abi property');
 }
 
-// Initialize provider (connection to the blockchain)
 const provider: Provider = new JsonRpcProvider(sepoliaRpcUrl);
-
-// Load the CoffeeCoin contract instance
 const coffeeCoinContract: Contract = new Contract(coffeeCoinContractAddress, CoffeeCoinABI.abi, provider);
 
-console.log(`BlockchainService: Connected to RPC at ${sepoliaRpcUrl}`);
-console.log(`BlockchainService: CoffeeCoin contract loaded at ${coffeeCoinContractAddress}`);
+// console.log(`BlockchainService: Connected to RPC at ${sepoliaRpcUrl}`);
+// console.log(`BlockchainService: CoffeeCoin contract loaded at ${coffeeCoinContractAddress}`);
 
 // --- Read-only functions ---
-
 export const getTokenName = async (): Promise<string> => {
   try {
-    const name: string = await coffeeCoinContract.name();
-    return name;
-  } catch (error) {
-    console.error('Error fetching token name:', error);
-    throw error;
-  }
+    return await coffeeCoinContract.name();
+  } catch (error) { console.error('Error fetching token name:', error); throw error; }
 };
 
 export const getTokenSymbol = async (): Promise<string> => {
   try {
-    const symbol: string = await coffeeCoinContract.symbol();
-    return symbol;
-  } catch (error) {
-    console.error('Error fetching token symbol:', error);
-    throw error;
-  }
+    return await coffeeCoinContract.symbol();
+  } catch (error) { console.error('Error fetching token symbol:', error); throw error; }
 };
 
 export const getTotalSupply = async (): Promise<bigint> => {
   try {
-    const totalSupply: bigint = await coffeeCoinContract.totalSupply();
-    // Our contract has 0 decimals, so this is the actual number of tokens
-    return totalSupply;
-  } catch (error) {
-    console.error('Error fetching total supply:', error);
-    throw error;
-  }
+    return await coffeeCoinContract.totalSupply();
+  } catch (error) { console.error('Error fetching total supply:', error); throw error; }
 };
 
 export const getCoffeeCoinBalance = async (userAddress: string): Promise<bigint> => {
   if (!ethers.isAddress(userAddress)) {
-    throw new Error('Invalid user address provided.');
+    throw new Error('Invalid user address provided for balance check.');
   }
   try {
-    const balance: bigint = await coffeeCoinContract.balanceOf(userAddress);
-    // Our contract has 0 decimals, so this is the actual number of tokens
-    return balance;
-  } catch (error) {
-    console.error(`Error fetching CoffeeCoin balance for ${userAddress}:`, error);
-    throw error;
-  }
+    return await coffeeCoinContract.balanceOf(userAddress);
+  } catch (error) { console.error(`Error fetching CoffeeCoin balance for ${userAddress}:`, error); throw error; }
 };
 
-// --- Write functions (will require a Signer) ---
-// We will implement these later when we have a server wallet or user context
+// --- Write functions (require a Signer) ---
 
 /**
  * Mints new CoffeeCoins to a specified address.
- * This function would typically be called by an authorized admin/server wallet.
+ * This function is called by the backend using the SERVER_WALLET_PRIVATE_KEY.
+ * The account associated with SERVER_WALLET_PRIVATE_KEY must be the owner of the CoffeeCoin contract
+ * or have a minter role (for Option 1, it's the owner).
  */
-// export const mintCoffeeCoins = async (recipientAddress: string, amount: bigint): Promise<string> => {
-//   if (!process.env.SERVER_WALLET_PRIVATE_KEY) {
-//     throw new Error('SERVER_WALLET_PRIVATE_KEY is not configured for minting.');
-//   }
-//   if (!ethers.isAddress(recipientAddress)) {
-//     throw new Error('Invalid recipient address for minting.');
-//   }
-//   if (amount <= 0n) {
-//     throw new Error('Mint amount must be positive.');
-//   }
+export const mintCoffeeCoins = async (recipientAddress: string, amountInWholeTokens: bigint): Promise<string> => {
+  if (!serverWalletPrivateKey) {
+    console.error('SERVER_WALLET_PRIVATE_KEY is not configured for minting.');
+    throw new Error('Minting service not configured: Missing server wallet private key.');
+  }
+  if (!ethers.isAddress(recipientAddress)) {
+    throw new Error('Invalid recipient address for minting.');
+  }
+  if (amountInWholeTokens <= 0n) { // Our token has 0 decimals, so amount is whole tokens
+    throw new Error('Mint amount must be positive.');
+  }
 
-//   const signerWallet = new ethers.Wallet(process.env.SERVER_WALLET_PRIVATE_KEY, provider);
-//   const contractWithSigner = coffeeCoinContract.connect(signerWallet) as Contract;
+  const signerWallet: Wallet = new Wallet(serverWalletPrivateKey, provider);
+  const contractWithSigner: Contract = coffeeCoinContract.connect(signerWallet) as Contract;
 
-//   try {
-//     const tx = await contractWithSigner.mint(recipientAddress, amount);
-//     await tx.wait(); // Wait for the transaction to be mined
-//     console.log(`Successfully minted ${amount} CoffeeCoins to ${recipientAddress}. Tx hash: ${tx.hash}`);
-//     return tx.hash;
-//   } catch (error) {
-//     console.error(`Error minting CoffeeCoins to ${recipientAddress}:`, error);
-//     throw error;
-//   }
-// };
+  console.log(`Attempting to mint ${amountInWholeTokens} CoffeeCoins to ${recipientAddress} using wallet ${signerWallet.address}...`);
 
-console.log('Blockchain service initialized.');
+  try {
+    // The 'amount' parameter for an ERC20 mint function typically expects the amount in the smallest unit (atomic units).
+    // Since our CoffeeCoin has 0 decimals, amountInWholeTokens IS the amount in smallest units.
+    const tx: TransactionResponse = await contractWithSigner.mint(recipientAddress, amountInWholeTokens);
+    console.log(`Minting transaction sent. Hash: ${tx.hash}. Waiting for confirmation...`);
+    
+    const receipt: TransactionReceipt | null = await tx.wait(1); // Wait for 1 confirmation
+    
+    if (receipt && receipt.status === 1) {
+      console.log(`Successfully minted ${amountInWholeTokens} CoffeeCoins to ${recipientAddress}. Tx confirmed: ${tx.hash}`);
+      return tx.hash;
+    } else {
+      console.error(`Minting transaction failed or was reverted. Tx hash: ${tx.hash}`, receipt);
+      throw new Error(`Minting transaction failed. Status: ${receipt?.status}. Tx hash: ${tx.hash}`);
+    }
+  } catch (error: any) {
+    console.error(`Error during minting CoffeeCoins to ${recipientAddress}:`, error);
+    // More detailed error logging
+    if (error.reason) console.error("Reason:", error.reason);
+    if (error.code) console.error("Code:", error.code);
+    if (error.transaction) console.error("Transaction:", error.transaction);
+    if (error.receipt) console.error("Receipt:", error.receipt);
+    throw new Error(`Failed to mint tokens: ${error.reason || error.message || 'Unknown error'}`);
+  }
+};
+
+// console.log('Blockchain service initialized with minting capability.');

@@ -27,17 +27,21 @@ app.get('/api/health', (req: Request, res: Response) => {
 // --- API Routes ---
 app.use('/api/coffee-coin', coffeeCoinRoutes);
 
+// backend/src/server.ts
+// ...
 app.get('/api/user/me', authenticateUser, (req: Request, res: Response) => {
-  if (req.user) {
+  const userFromRequest = (req as any).user; // Use 'as any' or proper typing
+  if (userFromRequest) {
     res.status(200).json({
       message: 'Successfully authenticated!',
-      privyDid: req.user.privyDid,
-      wallet: req.user.wallet,
+      privyDid: userFromRequest.privyDid,
+      wallet: userFromRequest.wallet, 
     });
   } else {
     res.status(401).json({ error: 'User not authenticated or user data unavailable' });
   }
 });
+// ...
 
 
 app.listen(port, () => {
