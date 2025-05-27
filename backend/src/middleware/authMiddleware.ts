@@ -2,107 +2,107 @@ import { Request, Response, NextFunction } from 'express';
 import privyClient from '../config/privy';
 import { User, WalletWithMetadata, LinkedAccountWithMetadata } from '@privy-io/server-auth';
 
-// Extend Express Request type to include 'user'
 declare global {
   namespace Express {
     interface Request {
       user?: {
         privyDid: string;
-        privyUser: User;
-        wallet?: {
+        privyUser: User; // Store the full Privy user object
+        wallet?: { // This is what the frontend will receive from this backend
             address: string;
-            chainId?: string | number;
-            walletType?: string;
+            chainId: string | number; // Ensure this matches the source type
+            walletType: string;     // Ensure this matches the source type
         }
       };
     }
   }
 }
 
-function isWallet(account: LinkedAccountWithMetadata): account is WalletWithMetadata {
-  return account && account.type === 'wallet' && typeof (account as WalletWithMetadata).address === 'string';
+// Type guard to check if a linked account is a WalletWithMetadata with necessary properties
+function isMatchingSepoliaWallet(account: LinkedAccountWithMetadata): account is WalletWithMetadata {
+  if (account.type !== 'wallet') return false;
+  const walletAccount = account as WalletWithMetadata; // Temporary cast to access wallet-specific fields
+  return (
+    typeof walletAccount.address === 'string' &&
+    walletAccount.chainType === 'ethereum' &&
+    parseInt(String(walletAccount.chainId), 10) === 11155111 && // Sepolia Chain ID
+    walletAccount.walletClientType === 'privy'
+  );
 }
 
-// Explicitly define the Express middleware type
-type AsyncExpressMiddleware = (req: Request, res: Response, next: NextFunction) => Promise<void>;
-
-export const authenticateUser: AsyncExpressMiddleware = async (req, res, next) => {
+export const authenticateUser = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   if (!privyClient) {
     console.error("Privy client is not initialized. Cannot authenticate user.");
     res.status(500).json({ error: 'Authentication service not configured.' });
-    return; // Ensure void return after response
+    return;
   }
 
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     res.status(401).json({ error: 'Unauthorized: Missing or invalid Authorization header' });
-    return; // Ensure void return after response
+    return;
   }
 
   const authToken = authHeader.substring(7);
 
   try {
     const verifiedClaims = await privyClient.verifyAuthToken(authToken);
-    const user = await privyClient.getUser(verifiedClaims.userId);
+    const privyUserObject = await privyClient.getUser(verifiedClaims.userId); // Renamed to avoid confusion
 
-    if (!user) {
-        console.warn(`User not found for Privy DID: ${verifiedClaims.userId}`);
-        res.status(404).json({ error: 'User not found' });
-        return; // Ensure void return after response
+    if (!privyUserObject) {
+        console.warn(`User not found on backend for Privy DID: ${verifiedClaims.userId}`);
+        res.status(404).json({ error: 'User not found by backend' });
+        return;
     }
 
-    let foundWalletData: { address: string; chainId?: string | number; walletType?: string } | undefined = undefined;
+    let targetWalletForBackend: { address: string; chainId: string | number; walletType: string } | undefined = undefined;
 
-    if (user.wallet && 
-        user.wallet.chainType === 'ethereum' && 
-        parseInt(String(user.wallet.chainId), 10) === 11155111 &&
-        user.wallet.walletClientType === 'privy') {
-        const primaryWallet = user.wallet as WalletWithMetadata; 
-        foundWalletData = {
-            address: primaryWallet.address,
-            chainId: primaryWallet.chainId,
-            walletType: primaryWallet.walletClientType,
+    // 1. Check the primary `user.wallet` property provided by Privy
+    if (privyUserObject.wallet && isMatchingSepoliaWallet(privyUserObject.wallet)) {
+        targetWalletForBackend = {
+            address: privyUserObject.wallet.address,
+            chainId: String(privyUserObject.wallet.chainId), // Standardize to string
+            walletType: privyUserObject.wallet.walletClientType,
         };
+        console.log("Found matching Sepolia wallet in privyUserObject.wallet:", targetWalletForBackend);
     } else {
-        const sepoliaWalletFromAccounts = user.linkedAccounts.find(
-          (acc): acc is WalletWithMetadata =>
-            isWallet(acc) &&
-            acc.chainType === 'ethereum' &&
-            parseInt(String(acc.chainId), 10) === 11155111 &&
-            acc.walletClientType === 'privy'
-        );
-
-        if (sepoliaWalletFromAccounts) {
-            foundWalletData = {
-                address: sepoliaWalletFromAccounts.address,
-                chainId: sepoliaWalletFromAccounts.chainId,
-                walletType: sepoliaWalletFromAccounts.walletClientType,
+        // 2. If not found or not matching, check `linkedAccounts`
+        const foundInLinked = privyUserObject.linkedAccounts.find(isMatchingSepoliaWallet);
+        if (foundInLinked) {
+            targetWalletForBackend = {
+                address: foundInLinked.address,
+                chainId: String(foundInLinked.chainId), // Standardize to string
+                walletType: foundInLinked.walletClientType,
             };
+            console.log("Found matching Sepolia wallet in privyUserObject.linkedAccounts:", targetWalletForBackend);
         }
     }
 
+    // Populate req.user for downstream route handlers
     req.user = {
-      privyDid: user.id,
-      privyUser: user,
-      wallet: foundWalletData,
+      privyDid: privyUserObject.id,
+      privyUser: privyUserObject, // Full Privy user object from backend
+      wallet: targetWalletForBackend, // This will be undefined if no matching wallet was found
     };
 
-    if (req.user && !req.user.wallet) {
-        console.warn(`User ${req.user.privyDid} does not have a linked Sepolia embedded wallet that was found.`);
+    if (!req.user.wallet) {
+        console.warn(`Backend: User ${req.user.privyDid} - No specific Sepolia embedded wallet found to forward to client response.`);
+    } else {
+        console.log(`Backend: Forwarding wallet for ${req.user.privyDid}:`, req.user.wallet);
     }
 
-    next(); // Call next for successful progression
+    next();
   } catch (error: any) {
-    console.error('Authentication error details:', error);
-    let errorMessage = 'Unauthorized: Invalid token or authentication failure.';
+    console.error('Backend Authentication error:', error.message || error);
+    let errorMessage = 'Unauthorized: Invalid token or backend authentication failure.';
     if (error.message) {
         if (error.message.includes('decode') || error.message.includes('signature')) {
-            errorMessage = 'Unauthorized: Invalid token format or signature.';
+            errorMessage = 'Unauthorized: Invalid token format or signature (backend).';
         } else if (error.message.includes('expired')) {
-            errorMessage = 'Unauthorized: Token has expired.';
+            errorMessage = 'Unauthorized: Token has expired (backend).';
         }
     }
     res.status(401).json({ error: errorMessage, details: error.message });
-    return; // Ensure void return after response
+    return;
   }
 };

@@ -1,6 +1,4 @@
-// Remove or comment out the direct User import if it's causing issues
-// import { PrivyProvider, usePrivy, User as PrivyUser } from '@privy-io/react-auth';
-import { PrivyProvider, usePrivy } from '@privy-io/react-auth'; // Standard import
+import { PrivyProvider, usePrivy } from '@privy-io/react-auth';
 import { useState, useEffect } from 'react';
 import './App.css';
 
@@ -19,33 +17,38 @@ interface AuthenticatedUserData {
 }
 
 function AppContent() {
-  // user object from usePrivy() is already typed by the library
-  const { ready, authenticated, user, login, logout, linkEmail } = usePrivy();
+  // --- CORRECTED: getAccessToken is directly from usePrivy ---
+  const { ready, authenticated, user, login, logout, linkEmail, getAccessToken } = usePrivy(); 
   const [backendUser, setBackendUser] = useState<AuthenticatedUserData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [coffeeCoinBalance, setCoffeeCoinBalance] = useState<string | null>(null);
   const [tokenInfo, setTokenInfo] = useState<{name: string, symbol: string} | null>(null);
 
-  const getAuthToken = async (): Promise<string | null> => {
-    if (!user) {
-      console.error("getAuthToken: Privy user object is not available.");
-      setStatusMessage("Privy user object not ready.");
-      return null;
+  // This function now correctly uses getAccessToken from the hook
+  const retrieveAuthToken = async (): Promise<string | null> => {
+    if (!authenticated || !ready) { // Ensure user is authenticated and privy is ready
+        console.warn("retrieveAuthToken: User not authenticated or Privy not ready.");
+        setStatusMessage("User not authenticated or Privy not ready to issue token.");
+        return null;
     }
     try {
-      setStatusMessage("Attempting to get auth token...");
-      const token = await user.getIdToken();
+      setStatusMessage("Attempting to get auth token (access token)...");
+      // --- CORRECTED: Call getAccessToken() directly ---
+      const token = await getAccessToken(); 
+      
       if (!token) {
-          console.warn("getAuthToken: user.getIdToken() returned null or undefined.");
-          setStatusMessage("Failed to get ID token from Privy user object.");
+          console.warn("retrieveAuthToken: getAccessToken() returned null or undefined.");
+          setStatusMessage("Failed to get access token from Privy.");
           return null;
       }
+      console.log("retrieveAuthToken: Access token retrieved successfully.");
       setStatusMessage("Auth token retrieved successfully.");
       return token;
     } catch (e) {
-      console.error("Error getting auth token from Privy:", e);
+      console.error("Error getting auth token (access token) from Privy:", e);
       setStatusMessage("Error encountered while getting auth token.");
+      setError("Could not get authentication token.");
       return null;
     }
   };
@@ -54,23 +57,24 @@ function AppContent() {
     setError(null);
     setBackendUser(null);
     setCoffeeCoinBalance(null);
-    setStatusMessage(null);
+    setStatusMessage("Preparing to fetch server data...");
+
 
     if (!authenticated || !ready) {
       setError('User not authenticated with Privy or Privy SDK not ready.');
       return;
     }
 
-    if (!user) {
-        setError("Privy user object not available. Cannot fetch backend data.");
-        return;
-    }
-
-    const authToken = await getAuthToken();
+    // No need to check for 'user' object here for token, as getAccessToken comes from the hook
+    const authToken = await retrieveAuthToken(); // Use the renamed function
     
     if (!authToken) {
-      setError("Could not retrieve auth token. Please ensure you are fully logged in or try again.");
+      // retrieveAuthToken will have already set an error/status message
       console.error("Auth token is null, cannot fetch backend user data.");
+      // setError might have been set by retrieveAuthToken, or set a generic one here if not.
+      if (!error && !statusMessage?.includes("Failed")) { // Avoid overwriting specific error
+        setError("Failed to obtain auth token for server request.");
+      }
       return;
     }
     
@@ -148,7 +152,7 @@ function AppContent() {
       {statusMessage && <p style={{ color: 'blue' }}><i>Status: {statusMessage}</i></p>}
       {error && <p style={{ color: 'red' }}><b>Error: {error}</b></p>}
 
-      {ready && authenticated && user ? ( // Added user check here for type safety before accessing user.id etc.
+      {ready && authenticated && user ? (
         <div>
           <h2>Welcome!</h2>
           <p><strong>Privy User ID (DID):</strong> {user.id}</p>
@@ -168,7 +172,6 @@ function AppContent() {
             {user.linkedAccounts.map((account, index) => (
               <li key={index}>
                 Type: <strong>{account.type}</strong>
-                {/* Use type assertions carefully or type guards for these properties */}
                 {account.type === 'wallet' && ` | Address: ${(account as any).address} | Chain: ${(account as any).chainId} (${(account as any).chainType}) | Wallet Type: ${(account as any).walletClientType}`}
                 {account.type === 'email' && ` | Email: ${(account as any).address}`}
                 {account.type === 'google' && ` | Subject: ${(account as any).subject} | Name: ${(account as any).name}`}
@@ -193,8 +196,7 @@ function AppContent() {
               )}
             </div>
           )}
-           {/* Check if email is NOT linked before showing button */}
-           {!user.email && ( // Simpler check: if user.email (which is a LinkedAccount) doesn't exist
+           {!user.email && (
               <button onClick={linkEmail} disabled={!ready}>Link Email</button>
             )}
         </div>
@@ -221,19 +223,14 @@ function App() {
     );
   }
   
-  // The 'user' parameter in onSuccess is already typed by PrivyProvider
   const handleLoginSuccess = (user: any) => { 
-    // 'user' here is the Privy user object. Its type is inferred.
-    // You can inspect its structure with console.log if needed.
     console.log(`User logged in successfully via App.tsx: ${user.id}`);
-    // If you need to strongly type it here, you'd find the correct import or define your own interface
-    // that matches the structure you expect. For now, 'any' or relying on inference is fine.
   };
 
   return (
     <PrivyProvider
       appId={privyAppId}
-      onSuccess={handleLoginSuccess} // The user object passed here will be typed by Privy
+      onSuccess={handleLoginSuccess}
       config={{
         loginMethods: ['email', 'google'],
         appearance: {
