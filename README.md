@@ -34,7 +34,6 @@ This project is a monorepo containing three distinct parts that work together to
     *   Allows users to view their CoffeeCoin balance and rewards.
 
  
-*(A simple diagram showing Frontend -> Backend -> Smart Contract would be great here!)*
 
 ---
 
