@@ -9,41 +9,43 @@
   <img src="https://img.shields.io/badge/Privy-161616?style=for-the-badge&logo=privy&logoColor=white" alt="Privy">
 </p>
 
-This repository contains a full-stack, decentralized loyalty program built on the Ethereum blockchain. It demonstrates how businesses can reward customers with custom ERC-20 tokens ("CoffeeCoin") for their purchases, creating an engaging and transparent rewards system.
+This repository contains a full-stack, decentralized loyalty program built on the Ethereum blockchain. It showcases a complete **mint-on-purchase and burn-on-redemption lifecycle** for a custom ERC-20 token, `CoffeeCoin`.
 
 The key innovation is the use of **Privy embedded wallets**, which abstracts away the complexities of Web3 for everyday users. Customers can create a wallet with just an email address, without needing to install MetaMask or manage seed phrases.
 
 ---
 
-## 🏛️ Project Architecture
+## 🏛️ Project Architecture & Token Flow
 
-This project is a monorepo containing three distinct parts that work together to create the full application experience:
+This project is a monorepo containing three distinct parts that work together. The core logic revolves around the `mint()` and `burn()` functions of the smart contract.
 
-1.  **`smart-contracts/`**: The core of the dApp.
-    *   Contains the `CoffeeCoin.sol` ERC-20 token contract.
+1.  **`smart-contracts/`**: The heart of the dApp.
+    *   Contains the `CoffeeCoin.sol` ERC-20 token contract, which includes owner-only `mint(to, amount)` and `burnFrom(from, amount)` functions.
     *   Uses **Hardhat** for compiling, testing, and deploying the contract to the **Sepolia testnet**.
 
-2.  **`backend/`**: A Node.js/Express server that acts as a secure intermediary.
-    *   Manages administrative tasks like minting new tokens.
-    *   Communicates with the deployed smart contract using **Ethers.js**.
-    *   Provides a REST API for the frontend to interact with the blockchain indirectly.
+2.  **`backend/`**: A Node.js/Express server that acts as the secure contract owner.
+    *   Securely holds the owner's private key to authorize minting and burning operations.
+    *   Provides a REST API for the frontend to trigger blockchain transactions safely.
 
-3.  **`frontend/`**: A modern React application that serves as the user interface.
-    *   Built with **Vite**, **TypeScript**, and **Tailwind CSS**.
+3.  **`frontend/`**: A modern React application that serves as the user interface for both customers and businesses.
     *   Integrates **Privy** for seamless, email-based wallet creation and user authentication.
-    *   Allows users to view their CoffeeCoin balance and rewards.
+    *   Allows users to view their CoffeeCoin balance and initiate reward redemptions.
 
- 
+### User Journey & Token Lifecycle
+
+1.  **Purchase & Minting:** A customer buys coffee. The point-of-sale system calls the backend API. The server, as the contract owner, then calls the `mint()` function on the smart contract, creating new `CoffeeCoin` and sending them directly to the customer's Privy wallet address.
+2.  **Redemption & Burning:** The customer decides to redeem a reward (e.g., a free coffee) on the frontend. This calls a backend endpoint. The server validates the request and then calls the `burnFrom()` function on the smart contract, permanently removing the specified amount of `CoffeeCoin` from the customer's wallet.
 
 ---
 
 ## ✨ Key Features
 
-*   **ERC-20 Loyalty Token:** A custom `CoffeeCoin` token built on the standard OpenZeppelin ERC-20 implementation.
-*   **Seamless User Onboarding:** **Privy** integration allows users without any crypto knowledge to participate easily.
-*   **Secure Admin Operations:** The backend server holds the owner's private key, ensuring that minting operations are secure and not exposed on the client side.
-*   **Monorepo Structure:** A clean, organized codebase with separate packages for each part of the application.
-*   **Full dApp Experience:** From smart contract deployment to a user-friendly frontend, this project covers the entire dApp lifecycle.
+*   **Mint-on-Purchase & Burn-on-Redeem:** A complete, auditable lifecycle for loyalty tokens.
+*   **Owner-Controlled Minting:** The backend is the sole minter, preventing unauthorized token creation.
+*   **User-Initiated Redemption (Burn):** Users can spend their tokens, which triggers the burn mechanism on the backend.
+*   **Seamless User Onboarding:** **Privy** integration removes the need for users to have prior crypto knowledge or wallets like MetaMask.
+*   **Secure, Decoupled Architecture:** The frontend never handles private keys; all sensitive operations are managed by the trusted backend.
+*   **Full dApp Experience:** From smart contract development to a user-friendly frontend, this project covers the entire dApp lifecycle.
 
 ---
 
